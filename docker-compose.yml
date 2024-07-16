@@ -1,0 +1,68 @@
+services:
+  backend:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - pgvector_db
+      - s3_db
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=rag_project.settings
+      - DATABASE_URL=postgres://${MANUAL_DB_USER}:${MANUAL_DB_PASSWORD}@pgvector_db:${MANUAL_DB_INTERNAL_PORT}/${MANUAL_DB_NAME}
+      - S3_DB_URL=http://s3_db:${S3_DB_INTERNAL_PORT}
+    ports:
+      - "8000:8000"
+    command: daphne -b 0.0.0.0 -p 8000 rag_project.asgi:application
+    networks:
+      - rag_network
+
+  pgvector_db:
+    build: ./pgvector_db
+    volumes:
+      - ./pgvector_db/init_pgvector.sql:/docker-entrypoint-initdb.d/init_pgvector.sql
+      - pgvector_db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${MANUAL_DB_NAME}
+      - POSTGRES_USER=${MANUAL_DB_USER}
+      - POSTGRES_PASSWORD=${MANUAL_DB_PASSWORD}
+    ports:
+      - "${MANUAL_DB_EXTERNAL_PORT}:${MANUAL_DB_INTERNAL_PORT}"
+    networks:
+      - rag_network
+
+  s3_db:
+    build: ./s3_db
+    volumes:
+      - ./s3_db:/app
+      - ./s3_db/data:/data
+    ports:
+      - "${S3_DB_EXTERNAL_PORT}:${S3_DB_INTERNAL_PORT}"
+    environment:
+      - DJANGO_SETTINGS_MODULE=s3_project.settings
+    command: gunicorn --bind 0.0.0.0:${S3_DB_INTERNAL_PORT} s3_project.wsgi:application
+    networks:
+      - rag_network
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "8080:8080"
+    environment:
+      - DJANGO_SETTINGS_MODULE=frontend_project.settings
+      - BACKEND_URL=http://backend:8000
+    command: gunicorn --bind 0.0.0.0:8080 frontend_project.wsgi:application
+    depends_on:
+      - backend
+    networks:
+      - rag_network
+
+networks:
+  rag_network:
+    driver: bridge
+
+volumes:
+  pgvector_db_data:
